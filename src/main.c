@@ -3,8 +3,9 @@
 #include "interfaces/http/server.h"
 #include <stdio.h>
 
-int main() {
-    // Initialize database connection
+int main()
+{
+
     DatabaseConfig config = {
         .host = "localhost",
         .user = "root",
@@ -12,26 +13,24 @@ int main() {
         .database = "rest_api",
         .port = 3306,
         .unix_socket = NULL,
-        .flags = 0
-    };
-    
+        .flags = 0};
+
     init_db_connection(config);
     MYSQL *conn = get_db_connection();
-    if (!conn) {
+    if (!conn)
+    {
         fprintf(stderr, "Failed to connect to database\n");
         return 1;
     }
-    
-    // Initialize server
-    if (!init_server()) {
+
+    if (!init_server())
+    {
         db_disconnect(conn);
         return 1;
     }
-    
-    // Start server
+
     start_server();
-    
-    // Cleanup
+
     db_disconnect(conn);
     return 0;
 }

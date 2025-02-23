@@ -8,13 +8,14 @@
 #include <stdlib.h>
 #include <time.h>
 
-#define JWT_EXPIRES_IN 3600  // 1 hour in seconds
+#define JWT_EXPIRES_IN 3600
 #define BASE64_SIZE(x) (((x + 2) / 3) * 4 + 1)
 
-static char* base64_encode(const unsigned char* input, int length) {
+static char *base64_encode(const unsigned char *input, int length)
+{
     BIO *bio, *b64;
     BUF_MEM *bufferPtr;
-    char* result;
+    char *result;
 
     b64 = BIO_new(BIO_f_base64());
     bio = BIO_new(BIO_s_mem());
@@ -24,7 +25,7 @@ static char* base64_encode(const unsigned char* input, int length) {
     BIO_flush(bio);
     BIO_get_mem_ptr(bio, &bufferPtr);
 
-    result = (char*)malloc(bufferPtr->length);
+    result = (char *)malloc(bufferPtr->length);
     memcpy(result, bufferPtr->data, bufferPtr->length - 1);
     result[bufferPtr->length - 1] = 0;
 
@@ -32,45 +33,42 @@ static char* base64_encode(const unsigned char* input, int length) {
     return result;
 }
 
-JWT* create_jwt(const char* user_id, const char* secret_key) {
-    JWT* jwt = malloc(sizeof(JWT));
-    if (!jwt) return NULL;
+JWT *create_jwt(const char *user_id, const char *secret_key)
+{
+    JWT *jwt = malloc(sizeof(JWT));
+    if (!jwt)
+        return NULL;
 
     time_t now = time(NULL);
     jwt->exp = now + JWT_EXPIRES_IN;
 
-    // Create header
-    const char* header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
-    char* base64_header = base64_encode((unsigned char*)header, strlen(header));
+    const char *header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
+    char *base64_header = base64_encode((unsigned char *)header, strlen(header));
 
-    // Create payload
     char payload[256];
-    snprintf(payload, sizeof(payload), 
-             "{\"user_id\":\"%s\",\"exp\":%ld}", 
+    snprintf(payload, sizeof(payload),
+             "{\"user_id\":\"%s\",\"exp\":%ld}",
              user_id, jwt->exp);
-    char* base64_payload = base64_encode((unsigned char*)payload, strlen(payload));
+    char *base64_payload = base64_encode((unsigned char *)payload, strlen(payload));
 
-    // Create signature
     char signature_input[512];
-    snprintf(signature_input, sizeof(signature_input), 
+    snprintf(signature_input, sizeof(signature_input),
              "%s.%s", base64_header, base64_payload);
 
-    unsigned char* signature = malloc(EVP_MAX_MD_SIZE);
+    unsigned char *signature = malloc(EVP_MAX_MD_SIZE);
     unsigned int signature_len;
 
     HMAC(EVP_sha256(), secret_key, strlen(secret_key),
-         (unsigned char*)signature_input, strlen(signature_input),
+         (unsigned char *)signature_input, strlen(signature_input),
          signature, &signature_len);
 
-    char* base64_signature = base64_encode(signature, signature_len);
+    char *base64_signature = base64_encode(signature, signature_len);
 
-    // Combine all parts
-    jwt->token = malloc(strlen(base64_header) + strlen(base64_payload) + 
-                       strlen(base64_signature) + 3);
-    sprintf(jwt->token, "%s.%s.%s", 
+    jwt->token = malloc(strlen(base64_header) + strlen(base64_payload) +
+                        strlen(base64_signature) + 3);
+    sprintf(jwt->token, "%s.%s.%s",
             base64_header, base64_payload, base64_signature);
 
-    // Cleanup
     free(base64_header);
     free(base64_payload);
     free(base64_signature);
@@ -79,35 +77,36 @@ JWT* create_jwt(const char* user_id, const char* secret_key) {
     return jwt;
 }
 
-int verify_jwt(const char* token, const char* secret_key) {
-    if (!token || !secret_key) return 0;
+int verify_jwt(const char *token, const char *secret_key)
+{
+    if (!token || !secret_key)
+        return 0;
 
-    char* token_copy = strdup(token);
-    char* header = strtok(token_copy, ".");
-    char* payload = strtok(NULL, ".");
-    char* signature = strtok(NULL, ".");
+    char *token_copy = strdup(token);
+    char *header = strtok(token_copy, ".");
+    char *payload = strtok(NULL, ".");
+    char *signature = strtok(NULL, ".");
 
-    if (!header || !payload || !signature) {
+    if (!header || !payload || !signature)
+    {
         free(token_copy);
         return 0;
     }
 
-    // Verify signature
     char signature_input[512];
     snprintf(signature_input, sizeof(signature_input), "%s.%s", header, payload);
 
-    unsigned char* computed_signature = malloc(EVP_MAX_MD_SIZE);
+    unsigned char *computed_signature = malloc(EVP_MAX_MD_SIZE);
     unsigned int signature_len;
 
     HMAC(EVP_sha256(), secret_key, strlen(secret_key),
-         (unsigned char*)signature_input, strlen(signature_input),
+         (unsigned char *)signature_input, strlen(signature_input),
          computed_signature, &signature_len);
 
-    char* base64_computed = base64_encode(computed_signature, signature_len);
+    char *base64_computed = base64_encode(computed_signature, signature_len);
 
     int result = (strcmp(base64_computed, signature) == 0);
 
-    // Cleanup
     free(token_copy);
     free(computed_signature);
     free(base64_computed);
@@ -115,9 +114,12 @@ int verify_jwt(const char* token, const char* secret_key) {
     return result;
 }
 
-void free_jwt(JWT* jwt) {
-    if (jwt) {
-        if (jwt->token) free(jwt->token);
+void free_jwt(JWT *jwt)
+{
+    if (jwt)
+    {
+        if (jwt->token)
+            free(jwt->token);
         free(jwt);
     }
-} 
+}

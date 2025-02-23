@@ -27,14 +27,79 @@ enum MHD_Result handle_login(struct MHD_Connection *connection,
         return ret;
     }
 
-    // Verify credentials from database
-    char query[512];
-    snprintf(query, sizeof(query),
-             "SELECT id FROM users WHERE username='%s' AND password_hash='%s'",
-             username, password); // Note: Use prepared statements in production!
+    MYSQL_STMT *stmt = mysql_stmt_init(conn);
+    if (!stmt)
+    {
+        const char *error = "{\"error\":\"Failed to initialize statement\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
 
-    MYSQL_RES *result = db_fetch_query(conn, query);
-    if (!result)
+    const char *query = "SELECT id FROM users WHERE username=? AND password_hash=?";
+    if (mysql_stmt_prepare(stmt, query, strlen(query)))
+    {
+        const char *error = "{\"error\":\"Failed to prepare statement\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        mysql_stmt_close(stmt);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    MYSQL_BIND bind[2];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = (void *)username;
+    bind[0].buffer_length = strlen(username);
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (void *)password;
+    bind[1].buffer_length = strlen(password);
+
+    if (mysql_stmt_bind_param(stmt, bind))
+    {
+        const char *error = "{\"error\":\"Failed to bind parameters\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        mysql_stmt_close(stmt);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    if (mysql_stmt_execute(stmt))
+    {
+        const char *error = "{\"error\":\"Failed to execute statement\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        mysql_stmt_close(stmt);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    MYSQL_BIND result_bind[1];
+    char user_id[37];
+    unsigned long length;
+    memset(result_bind, 0, sizeof(result_bind));
+
+    result_bind[0].buffer_type = MYSQL_TYPE_STRING;
+    result_bind[0].buffer = user_id;
+    result_bind[0].buffer_length = sizeof(user_id);
+    result_bind[0].length = &length;
+
+    if (mysql_stmt_bind_result(stmt, result_bind))
+    {
+        const char *error = "{\"error\":\"Failed to bind result\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        mysql_stmt_close(stmt);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    if (mysql_stmt_fetch(stmt) != 0)
     {
         json_t *error = json_object();
         json_object_set_new(error, "error", json_string("Invalid credentials"));
@@ -45,14 +110,11 @@ enum MHD_Result handle_login(struct MHD_Connection *connection,
 
         json_decref(error);
         free(error_str);
+        mysql_stmt_close(stmt);
         MHD_destroy_response(response);
         return ret;
     }
 
-    MYSQL_ROW row = mysql_fetch_row(result);
-    const char *user_id = row[0];
-
-    // Create JWT
     JWT *jwt = create_jwt(user_id, SECRET_KEY);
 
     json_t *success = json_object();
@@ -62,11 +124,10 @@ enum MHD_Result handle_login(struct MHD_Connection *connection,
     struct MHD_Response *response = create_json_response(success_str);
     enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
 
-    // Cleanup
     json_decref(success);
     free(success_str);
     free_jwt(jwt);
-    mysql_free_result(result);
+    mysql_stmt_close(stmt);
     MHD_destroy_response(response);
 
     return ret;
@@ -88,9 +149,9 @@ int verify_auth_token(struct MHD_Connection *connection)
 }
 
 enum MHD_Result handle_register(struct MHD_Connection *connection,
-                              const char *username,
-                              const char *password,
-                              const char *email)
+                                const char *username,
+                                const char *password,
+                                const char *email)
 {
     MYSQL *conn = get_db_connection();
     if (!conn)
@@ -102,22 +163,65 @@ enum MHD_Result handle_register(struct MHD_Connection *connection,
         return ret;
     }
 
-    // Generate UUID for user
     char uuid[37];
-    snprintf(uuid, sizeof(uuid), "%d", rand()); // In production, use proper UUID generation
+    snprintf(uuid, sizeof(uuid), "%d", rand());
 
-    // Hash the password (in production, use proper password hashing)
-    char query[1024];
-    snprintf(query, sizeof(query),
-             "INSERT INTO users (id, username, password_hash, email) "
-             "VALUES ('%s', '%s', '%s', '%s')",
-             uuid, username, password, email);
+    MYSQL_STMT *stmt = mysql_stmt_init(conn);
+    if (!stmt)
+    {
+        const char *error = "{\"error\":\"Failed to initialize statement\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
 
-    if (!db_execute_query(conn, query))
+    const char *query = "INSERT INTO users (id, username, password_hash, email) VALUES (?, ?, ?, ?)";
+    if (mysql_stmt_prepare(stmt, query, strlen(query)))
+    {
+        const char *error = "{\"error\":\"Failed to prepare statement\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        mysql_stmt_close(stmt);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    MYSQL_BIND bind[4];
+    memset(bind, 0, sizeof(bind));
+
+    bind[0].buffer_type = MYSQL_TYPE_STRING;
+    bind[0].buffer = uuid;
+    bind[0].buffer_length = strlen(uuid);
+
+    bind[1].buffer_type = MYSQL_TYPE_STRING;
+    bind[1].buffer = (void *)username;
+    bind[1].buffer_length = strlen(username);
+
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (void *)password;
+    bind[2].buffer_length = strlen(password);
+
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = (void *)email;
+    bind[3].buffer_length = strlen(email);
+
+    if (mysql_stmt_bind_param(stmt, bind))
+    {
+        const char *error = "{\"error\":\"Failed to bind parameters\"}";
+        struct MHD_Response *response = create_json_response(error);
+        enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+        mysql_stmt_close(stmt);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    if (mysql_stmt_execute(stmt))
     {
         const char *error = "{\"error\":\"Username or email already exists\"}";
         struct MHD_Response *response = create_json_response(error);
         enum MHD_Result ret = MHD_queue_response(connection, MHD_HTTP_CONFLICT, response);
+        mysql_stmt_close(stmt);
         MHD_destroy_response(response);
         return ret;
     }
@@ -131,6 +235,7 @@ enum MHD_Result handle_register(struct MHD_Connection *connection,
 
     json_decref(success);
     free(success_str);
+    mysql_stmt_close(stmt);
     MHD_destroy_response(response);
 
     return ret;
